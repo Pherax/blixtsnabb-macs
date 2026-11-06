@@ -1,0 +1,432 @@
+# BLIXTSNABB MACS controller - ESPHome configuration.
+#
+# Default: LISTEN. The controller only receives; the original panel stays in charge.
+# Read docs/CONTROLLER.md and docs/HARDWARE.md before changing hob_mode.
+#
+#   listen  receive only (safe default, works with the original panel connected)
+#   dev     one-shot test commands while the original panel stays connected
+#   auto    listen 35 s at boot, then Dev if a panel is seen, otherwise Master
+#   master  replace the original panel (panel physically disconnected)
+#
+# auto and master also need allow_master: "true".
+# Never run two controllers in auto/master on one bus; fix the second one to listen.
+
+substitutions:
+  device_name: induction
+  board: esp32dev            # ESP32-C3 SuperMini: esp32-c3-devkitm-1
+  rx_pin: GPIO27             # ESP32-C3 SuperMini: GPIO0
+  tx_pin: GPIO25             # ESP32-C3 SuperMini: GPIO1
+  hob_mode: listen
+  allow_master: "false"
+
+esphome:
+  min_version: 2026.8.0
+  name: ${device_name}
+  friendly_name: ${device_name}
+  project:
+    name: custom.macs_hob
+    version: "r5.1-20261106"
+
+esp32:
+  board: ${board}
+  framework:
+    type: esp-idf
+
+# Optional: encrypted state push to the reTerminal Sticky remote (needs sticky_push_key).
+# packages:
+#   sticky_direct: !include packages/sticky-direct.yaml
+
+external_components:
+  - source:
+      type: local
+      path: MACS/components
+    components: [macs_hob]
+
+wifi:
+  ssid: !secret iot_wifi_ssid
+  password: !secret iot_wifi_password
+  power_save_mode: none
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    password: !secret macs_ota_password
+
+logger:
+  baud_rate: 0
+  level: DEBUG
+  initial_level: DEBUG
+  logs:
+    macs_hob: DEBUG
+    sensor: NONE
+    text_sensor: NONE
+    binary_sensor: NONE
+
+uart:
+  id: macs_uart
+  rx_pin:
+    number: ${rx_pin}
+    inverted: true
+    mode: INPUT
+  tx_pin:
+    number: ${tx_pin}
+    inverted: true
+  baud_rate: 9600
+  data_bits: 8
+  parity: EVEN
+  stop_bits: 1
+  rx_buffer_size: 4096
+
+macs_hob:
+  id: hob
+  uart_id: macs_uart
+  mode: ${hob_mode}
+  allow_master: ${allow_master}
+  max_level: 10          # 10 = P / boost
+  command_timeout: 30min
+  require_api_connection: false # permits standalone web control; 30min timeout remains
+  table_interval: 4s
+  pan_absence_timeout: 60s
+  communication_timeout: 12s
+
+# ---------------------------------------------------------------------------
+# Mode. Not optimistic: it reports what the component actually accepted, so a
+# refused change snaps back instead of showing a state that was rejected.
+
+select:
+  - platform: template
+    name: "Mode"
+    id: hob_mode
+    icon: mdi:shield-key
+    entity_category: config
+    options: ["Auto", "Listen", "Dev", "Master"]
+    update_interval: 1s
+    lambda: 'return {id(hob)->mode_name()};'
+    set_action:
+      - lambda: 'id(hob)->set_mode_by_name(x);'
+
+button:
+  - platform: template
+    name: "Reset fault"
+    on_press:
+      - lambda: 'id(hob)->reset_fault();'
+
+  - platform: template
+    name: "Stop all zones"
+    icon: mdi:stop-circle-outline
+    on_press:
+      - lambda: 'id(hob)->stop_all();'
+
+  - platform: template
+    name: "Bus probe"
+    icon: mdi:test-tube
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(hob)->send_probe();'
+
+  # One-shot actions rather than switches: a dev-mode injection is an event,
+  # not a state, and buttons cannot fire during state restoration.
+  - platform: template
+    name: "Hob on"
+    icon: mdi:power-on
+    on_press:
+      - lambda: 'id(hob)->set_hob_on(true);'
+
+  - platform: template
+    name: "Hob off"
+    icon: mdi:power-off
+    on_press:
+      - lambda: 'id(hob)->set_hob_on(false);'
+
+# ---------------------------------------------------------------------------
+# Zone levels. Capped at max_level. Each reports the decoded bus value rather
+# than the last click, so a slider returns to what the hob actually shows.
+
+number:
+  - platform: template
+    name: "Bottom left"
+    icon: mdi:stove
+    min_value: 0
+    max_value: 10
+    step: 1
+    mode: slider
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->mode() == macs_hob::MODE_MASTER ? id(hob)->commanded_level(0) : id(hob)->observed_level(0);
+      if (v < 0) return NAN;
+      return v;
+    set_action:
+      - lambda: 'id(hob)->set_zone_level(0, (uint8_t) x);'
+
+  - platform: template
+    name: "Top left"
+    icon: mdi:stove
+    min_value: 0
+    max_value: 10
+    step: 1
+    mode: slider
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->mode() == macs_hob::MODE_MASTER ? id(hob)->commanded_level(1) : id(hob)->observed_level(1);
+      if (v < 0) return NAN;
+      return v;
+    set_action:
+      - lambda: 'id(hob)->set_zone_level(1, (uint8_t) x);'
+
+  - platform: template
+    name: "Middle"
+    icon: mdi:stove
+    min_value: 0
+    max_value: 10
+    step: 1
+    mode: slider
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->mode() == macs_hob::MODE_MASTER ? id(hob)->commanded_level(2) : id(hob)->observed_level(2);
+      if (v < 0) return NAN;
+      return v;
+    set_action:
+      - lambda: 'id(hob)->set_zone_level(2, (uint8_t) x);'
+
+  - platform: template
+    name: "Bottom right"
+    icon: mdi:stove
+    min_value: 0
+    max_value: 10
+    step: 1
+    mode: slider
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->mode() == macs_hob::MODE_MASTER ? id(hob)->commanded_level(3) : id(hob)->observed_level(3);
+      if (v < 0) return NAN;
+      return v;
+    set_action:
+      - lambda: 'id(hob)->set_zone_level(3, (uint8_t) x);'
+
+  - platform: template
+    name: "Top right"
+    icon: mdi:stove
+    min_value: 0
+    max_value: 10
+    step: 1
+    mode: slider
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->mode() == macs_hob::MODE_MASTER ? id(hob)->commanded_level(4) : id(hob)->observed_level(4);
+      if (v < 0) return NAN;
+      return v;
+    set_action:
+      - lambda: 'id(hob)->set_zone_level(4, (uint8_t) x);'
+
+# ---------------------------------------------------------------------------
+# Observed state. Heat comes from a flag the hob reports, not a temperature
+# sensor, and every reading goes unknown after 60 s without fresh data.
+
+text_sensor:
+  - platform: template
+    name: "Firmware revision"
+    update_interval: 60s
+    lambda: 'return {"macs-r5-20261029"};'
+  - platform: template
+    name: "Status"
+    icon: mdi:information-outline
+    update_interval: 2s
+    lambda: 'return {id(hob)->status_text()};'
+
+  - platform: template
+    name: "Bottom left setting"
+    update_interval: 2s
+    lambda: 'return {id(hob)->observed_setting(0)};'
+  - platform: template
+    name: "Top left setting"
+    update_interval: 2s
+    lambda: 'return {id(hob)->observed_setting(1)};'
+  - platform: template
+    name: "Middle setting"
+    update_interval: 2s
+    lambda: 'return {id(hob)->observed_setting(2)};'
+  - platform: template
+    name: "Bottom right setting"
+    update_interval: 2s
+    lambda: 'return {id(hob)->observed_setting(3)};'
+  - platform: template
+    name: "Top right setting"
+    update_interval: 2s
+    lambda: 'return {id(hob)->observed_setting(4)};'
+
+  - platform: template
+    name: "Bottom left pan"
+    icon: mdi:pot-steam
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->zone_pan(0);
+      return {v < 0 ? "Unknown" : v ? "Present" : "Absent"};
+  - platform: template
+    name: "Top left pan"
+    icon: mdi:pot-steam
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->zone_pan(1);
+      return {v < 0 ? "Unknown" : v ? "Present" : "Absent"};
+  - platform: template
+    name: "Middle pan"
+    icon: mdi:pot-steam
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->zone_pan(2);
+      return {v < 0 ? "Unknown" : v ? "Present" : "Absent"};
+  - platform: template
+    name: "Bottom right pan"
+    icon: mdi:pot-steam
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->zone_pan(3);
+      return {v < 0 ? "Unknown" : v ? "Present" : "Absent"};
+  - platform: template
+    name: "Top right pan"
+    icon: mdi:pot-steam
+    update_interval: 2s
+    lambda: |-
+      const int8_t v = id(hob)->zone_pan(4);
+      return {v < 0 ? "Unknown" : v ? "Present" : "Absent"};
+
+  - platform: template
+    name: "Bottom left raw"
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return {id(hob)->observed_raw(0)};'
+  - platform: template
+    name: "Top left raw"
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return {id(hob)->observed_raw(1)};'
+  - platform: template
+    name: "Middle raw"
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return {id(hob)->observed_raw(2)};'
+  - platform: template
+    name: "Bottom right raw"
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return {id(hob)->observed_raw(3)};'
+  - platform: template
+    name: "Top right raw"
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return {id(hob)->observed_raw(4)};'
+
+  - platform: template
+    name: "Hob state"
+    update_interval: 1s
+    lambda: |-
+      if (id(hob)->mode() == macs_hob::MODE_MASTER)
+        return {id(hob)->commanded_on() ? "Commanded on" : "Commanded off"};
+      const int v = id(hob)->observed_hob_state();
+      return {v < 0 ? "Unknown" : v ? "On" : "Off"};
+  - platform: template
+    name: "Bottom left hot"
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->zone_hot(0);
+      return {v < 0 ? "Unknown" : v ? "Hot" : "Not hot"};
+  - platform: template
+    name: "Top left hot"
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->zone_hot(1);
+      return {v < 0 ? "Unknown" : v ? "Hot" : "Not hot"};
+  - platform: template
+    name: "Middle hot"
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->zone_hot(2);
+      return {v < 0 ? "Unknown" : v ? "Hot" : "Not hot"};
+  - platform: template
+    name: "Bottom right hot"
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->zone_hot(3);
+      return {v < 0 ? "Unknown" : v ? "Hot" : "Not hot"};
+  - platform: template
+    name: "Top right hot"
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->zone_hot(4);
+      return {v < 0 ? "Unknown" : v ? "Hot" : "Not hot"};
+
+binary_sensor:
+  - platform: template
+    name: "Master ready"
+    lambda: 'return id(hob)->ready();'
+  - platform: template
+    name: "Controller fault"
+    lambda: 'return id(hob)->faulted();'
+  - platform: template
+    name: "Board 0x24 configuration acknowledged"
+    entity_category: diagnostic
+    lambda: 'return id(hob)->board_provisioned(0);'
+  - platform: template
+    name: "Board 0x44 configuration acknowledged"
+    entity_category: diagnostic
+    lambda: 'return id(hob)->board_provisioned(1);'
+  - platform: template
+    name: "Board 0x64 configuration acknowledged"
+    entity_category: diagnostic
+    lambda: 'return id(hob)->board_provisioned(2);'
+  - platform: template
+    name: "Board 0x84 configuration acknowledged"
+    entity_category: diagnostic
+    lambda: 'return id(hob)->board_provisioned(3);'
+
+web_server:
+  port: 80
+  version: 2
+  js_url: ""
+  css_url: ""
+  js_include: MACS/dashboard.js
+  log: false
+
+sensor:
+  - platform: template
+    name: "Bottom left pan timeout"
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->pan_timeout_remaining(0);
+      return v < 0 ? NAN : v;
+  - platform: template
+    name: "Top left pan timeout"
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->pan_timeout_remaining(1);
+      return v < 0 ? NAN : v;
+  - platform: template
+    name: "Middle pan timeout"
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->pan_timeout_remaining(2);
+      return v < 0 ? NAN : v;
+  - platform: template
+    name: "Bottom right pan timeout"
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->pan_timeout_remaining(3);
+      return v < 0 ? NAN : v;
+  - platform: template
+    name: "Top right pan timeout"
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 1s
+    lambda: |-
+      const int v = id(hob)->pan_timeout_remaining(4);
+      return v < 0 ? NAN : v;

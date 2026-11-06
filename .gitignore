@@ -1,0 +1,7 @@
+# ESPHome
+.esphome/
+**/.esphome/
+secrets.yaml
+# Python / Node
+__pycache__/
+node_modules/

@@ -1,0 +1,10 @@
+# OPTIONAL: replace the hob's entire wifi block with this; do not simply merge
+# with its old ssid/password. Set a strong, unique password in secrets.yaml.
+wifi:
+  ap:
+    ssid: "Blixtsnabb-Control"
+    password: !secret hob_ap_password
+  reboot_timeout: 0s
+  power_save_mode: none
+# Sticky: use the same SSID/password as a normal station, retain its existing
+# enable_on_boot and power-saving settings, and set hob_url to http://192.168.4.1.

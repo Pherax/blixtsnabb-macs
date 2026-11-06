@@ -1,0 +1,108 @@
+# Optional package for induction.yaml: enable it under "packages:" there.
+# Requires existing macs_hob id: hob and web_server.
+#
+# v0.13: the hob now PUSHES its state to the Sticky over encrypted UDP (packet_transport),
+# about once a second and immediately on every change. The HTTP snapshot below stays for
+# the Sticky's connection test and as a fallback when UDP does not get through.
+# Needs `sticky_push_key` in the hob's secrets.yaml (same value as on the Sticky).
+json:
+
+text_sensor:
+  - platform: template
+    name: "Sticky snapshot"
+    id: sticky_snapshot
+    internal: false
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return json::build_json([](JsonObject root) {
+        root["schema"]=1;
+        root["tick"]=millis();
+        root["mode"]=id(hob)->mode_name();
+        root["ready"]=id(hob)->ready();
+        root["fault"]=id(hob)->faulted();
+        bool master=id(hob)->mode()==macs_hob::MODE_MASTER;
+        int state=master?int(id(hob)->commanded_on()):id(hob)->observed_hob_state();
+        root["hob"]=state<0?"Unknown":state?(master?"Commanded on":"On"):(master?"Commanded off":"Off");
+        auto levels=root["levels"].to<JsonArray>();
+        auto pan=root["pan"].to<JsonArray>();
+        auto hot=root["hot"].to<JsonArray>();
+        for(int z=0;z<5;z++) {
+          levels.add(master?id(hob)->commanded_level(z):id(hob)->observed_level(z));
+          pan.add(id(hob)->zone_pan(z));
+          hot.add(id(hob)->zone_hot(z));
+        }
+      });
+
+# --- Push link -----------------------------------------------------------------
+# Four integer-packed values (all exact in a float, < 2^24). Decoded on the Sticky by
+# sticky/push.h. Never commands: the Sticky still sends commands over HTTP.
+sensor:
+  - platform: template
+    id: sticky_push_levels   # 4 bits per zone: level+1 (0 = unknown, 1..11 = 0..10)
+    internal: true
+    update_interval: 1s
+    lambda: |-
+      bool master=id(hob)->mode()==macs_hob::MODE_MASTER;
+      uint32_t v=0;
+      for(int z=0;z<5;z++) {
+        int l=master?id(hob)->commanded_level(z):id(hob)->observed_level(z);
+        v|=uint32_t(std::max(-1,std::min(10,l))+1)<<(4*z);
+      }
+      return float(v);
+  - platform: template
+    id: sticky_push_flags    # 2 bits per zone: pan+1 in bits 0-9, hot+1 in bits 10-19
+    internal: true
+    update_interval: 1s
+    lambda: |-
+      uint32_t v=0;
+      for(int z=0;z<5;z++) {
+        v|=uint32_t(std::max(-1,std::min(1,int(id(hob)->zone_pan(z))))+1)<<(2*z);
+        v|=uint32_t(std::max(-1,std::min(1,int(id(hob)->zone_hot(z))))+1)<<(10+2*z);
+      }
+      return float(v);
+  - platform: template
+    id: sticky_push_meta     # bits 0-2 mode, 3-4 hob state, 5 master, 6 ready, 7 fault
+    internal: true
+    update_interval: 1s
+    lambda: |-
+      const std::string m=id(hob)->mode_name();
+      uint32_t mode=m=="Auto"?1:m=="Listen"?2:m=="Dev"?3:m=="Master"?4:0;
+      bool master=id(hob)->mode()==macs_hob::MODE_MASTER;
+      int state=master?int(id(hob)->commanded_on()):id(hob)->observed_hob_state();
+      uint32_t v=mode | uint32_t(state<0?0:state?2:1)<<3 | uint32_t(master)<<5 |
+                 uint32_t(id(hob)->ready())<<6 | uint32_t(id(hob)->faulted())<<7;
+      return float(v);
+  - platform: template
+    id: sticky_push_tick     # seconds since boot, proves the data is live
+    internal: true
+    update_interval: 1s
+    lambda: return float((millis()/1000) & 0xFFFFFF);
+
+udp:
+  id: sticky_udp
+  # Default port 18511, broadcast to the local network.
+
+packet_transport:
+  - platform: udp
+    id: sticky_push
+    udp_id: sticky_udp
+    update_interval: 5s      # full resend; changes go out immediately
+    encryption:
+      key: !secret sticky_push_key
+    rolling_code_enable: true
+    sensors:
+      - sticky_push_levels
+      - sticky_push_flags
+      - sticky_push_meta
+      - sticky_push_tick
+
+# Advertise the hob for Settings > Hob connection > Detect hobs.
+# Match port to your existing web_server port (default 80).
+mdns:
+  services:
+    - service: "_macshob"
+      protocol: "_tcp"
+      port: 80
+      txt:
+        schema: "1"
