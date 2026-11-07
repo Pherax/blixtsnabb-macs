@@ -1,5 +1,15 @@
 # Changelog
 
+## r5.2 (7 November 2026)
+
+* **Automatic switch-off per level, like the original panel**, replaces the fixed 30-minute command timeout that
+  switched the hob off after half an hour of cooking. A zone left at the same level turns the hob off after
+  6 h (levels 1–2), 5 h (3–4), 4 h (5) or 1.5 h (6–9 and P); changing that zone's level restarts its timer.
+  The status then shows *Fault: Automatic switch-off*.
+* New option `auto_switch_off` (default `true`). `command_timeout` now defaults to `0s` (off) and remains
+  available as an extra limit. Update the `macs_hob:` block in your own YAML: remove `command_timeout: 30min`
+  or set it to `0s`.
+
 ## r5.1 (6 November 2026)
 
 * ESP32 (classic) supported next to the ESP32-C3: board and pins are substitutions in `induction.yaml`.

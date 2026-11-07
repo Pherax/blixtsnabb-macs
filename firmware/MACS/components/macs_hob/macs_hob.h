@@ -99,6 +99,13 @@ class MacsHob : public Component, public uart::UARTDevice {
   void set_allow_master(bool v) { this->allow_master_ = v; }
   void set_max_level(uint8_t v) { this->max_level_ = v; }
   void set_command_timeout(uint32_t ms) { this->cmd_timeout_ = ms; }
+  void set_auto_switch_off(bool v) { this->auto_off_ = v; }
+  // Original panel's automatic switch-off: a zone left at the same level too long turns
+  // the hob off. Levels 1-2: 6 h, 3-4: 5 h, 5: 4 h, 6-9 and P: 1.5 h.
+  static uint32_t auto_off_ms(uint8_t level) {
+    const uint32_t h = 3600000UL;
+    return level == 0 ? 0 : level <= 2 ? 6 * h : level <= 4 ? 5 * h : level == 5 ? 4 * h : 3 * h / 2;
+  }
   void set_require_api(bool v) { this->require_api_ = v; }
   void set_table_interval(uint32_t ms) { this->table_interval_ = ms; }
 
@@ -247,7 +254,9 @@ class MacsHob : public Component, public uart::UARTDevice {
   uint32_t api_lost_since_{0};
 
   uint8_t max_level_{9};
-  uint32_t cmd_timeout_{1800000};
+  uint32_t cmd_timeout_{0};
+  bool auto_off_{true};
+  uint32_t level_since_[NUM_ZONES]{0, 0, 0, 0, 0};
   uint32_t table_interval_{4000};
   bool require_api_{true};
 };

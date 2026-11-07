@@ -48,7 +48,8 @@ status restores it without a manual reset. Loss of status while on is a fault.
 | Generator state other than `03` more than 3 s after on | Fault |
 | Start-up not completed within 45 s | Fault |
 | No ACK after 3 attempts | Fault |
-| No new command for 30 min while a level is active | Levels cleared (command timeout) |
+| A zone unchanged at one level for 6 h (1–2), 5 h (3–4), 4 h (5) or 1.5 h (6–9, P) | Fault *Automatic switch-off*, all levels cleared (same times as the original panel; a level change restarts the zone's timer) |
+| Optional `command_timeout` (default off): no command of any kind for that time | Levels cleared |
 | API supervision enabled and lost for ~15 s | Fault |
 | Shutdown or OTA | Best-effort zero tables and off broadcast (not verified by ACK) |
 

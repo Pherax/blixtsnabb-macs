@@ -25,7 +25,7 @@ esphome:
   friendly_name: ${device_name}
   project:
     name: custom.macs_hob
-    version: "r5.1-20261106"
+    version: "r5.2-20261107"
 
 esp32:
   board: ${board}
@@ -85,8 +85,11 @@ macs_hob:
   mode: ${hob_mode}
   allow_master: ${allow_master}
   max_level: 10          # 10 = P / boost
-  command_timeout: 30min
-  require_api_connection: false # permits standalone web control; 30min timeout remains
+  # Automatic switch-off like the original panel: a zone left at one level turns the hob
+  # off after 6 h (levels 1-2), 5 h (3-4), 4 h (5) or 1.5 h (6-9, P). Changing the level restarts it.
+  auto_switch_off: true
+  command_timeout: 0s    # optional extra limit since the last command; 0s = off
+  require_api_connection: false # permits standalone web control; auto switch-off remains
   table_interval: 4s
   pan_absence_timeout: 60s
   communication_timeout: 12s

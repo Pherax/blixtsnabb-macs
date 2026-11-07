@@ -31,9 +31,12 @@ _BASE_SCHEMA = (
             cv.Optional("communication_timeout", default="12s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_ALLOW_MASTER, default=False): cv.boolean,
             cv.Optional(CONF_MAX_LEVEL, default=9): cv.int_range(min=0, max=10),
+            # Extra limit since the last command of any kind; 0s = off. The per-level
+            # automatic switch-off below (like the original panel) is the normal limit.
             cv.Optional(
-                CONF_COMMAND_TIMEOUT, default="30min"
+                CONF_COMMAND_TIMEOUT, default="0s"
             ): cv.positive_time_period_milliseconds,
+            cv.Optional("auto_switch_off", default=True): cv.boolean,
             cv.Optional(CONF_REQUIRE_API, default=True): cv.boolean,
             cv.Optional(
                 CONF_TABLE_INTERVAL, default="4s"
@@ -75,6 +78,7 @@ async def to_code(config):
     cg.add(var.set_allow_master(config[CONF_ALLOW_MASTER]))
     cg.add(var.set_max_level(config[CONF_MAX_LEVEL]))
     cg.add(var.set_command_timeout(config[CONF_COMMAND_TIMEOUT].total_milliseconds))
+    cg.add(var.set_auto_switch_off(config["auto_switch_off"]))
     cg.add(var.set_require_api(config[CONF_REQUIRE_API]))
     cg.add(var.set_table_interval(config[CONF_TABLE_INTERVAL].total_milliseconds))
 

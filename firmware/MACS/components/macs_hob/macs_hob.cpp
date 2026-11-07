@@ -723,6 +723,7 @@ void MacsHob::set_zone_level(uint8_t zone, uint8_t level) {
     if (levels_[zone] == 0 || level == 0) {
       pan_timing_[zone] = false; unknown_timing_[zone] = false;
     }
+    if (levels_[zone] != level) level_since_[zone] = millis();  // auto switch-off restarts on a change
     this->levels_[zone] = level;
     this->drop_superseded_tables_();
     this->push_tables_(0, level > 0 ? PRIO_SETPOINT : PRIO_STOP);
@@ -889,6 +890,18 @@ void MacsHob::check_safety_() {
   }
 #endif
 
+  if (this->auto_off_ && this->mode_ == MODE_MASTER) {
+    for (uint8_t z = 0; z < NUM_ZONES; z++) {
+      const uint8_t lv = this->levels_[z];
+      if (lv > 0 && now - this->level_since_[z] > auto_off_ms(lv)) {
+        ESP_LOGW(TAG, "Zone %u unchanged at level %u for %u min; automatic switch-off", z, lv,
+                 unsigned((now - this->level_since_[z]) / 60000));
+        latch_fault_("Automatic switch-off");
+        this->last_stop_ = STOP_TIMEOUT;
+        return;
+      }
+    }
+  }
   if (any && this->cmd_timeout_ > 0 && now - this->last_command_ > this->cmd_timeout_) {
     ESP_LOGW(TAG, "Idle timeout; stopping");
     latch_fault_("Command timeout");

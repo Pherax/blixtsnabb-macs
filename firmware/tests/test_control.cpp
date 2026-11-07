@@ -148,5 +148,16 @@ int main(){
 {Hob h;h.simulate_ready();h.set_hob_on(true);test_millis+=12001;h.check_safety_();
  assert(h.faulted()&&!h.commanded_on());h.status();h.check_safety_();
  assert(h.faulted()&&!h.ready());}
-std::cout<<"31 control scenarios passed\n";
+// Automatic switch-off per level, like the original panel (no 30 min idle limit any more).
+{Hob h;h.simulate_ready();h.set_hob_on(true);h.set_zone_level(3,6);h.set_zone_level(2,2);
+ for(int m=0;m<89;++m){test_millis+=60000;h.status();h.check_safety_();}
+ assert(!h.faulted());assert(h.commanded_level(3)==6);
+ h.set_zone_level(3,6);test_millis+=2*60000;h.status();h.check_safety_();assert(h.faulted());}
+{Hob h;h.simulate_ready();h.set_hob_on(true);h.set_zone_level(3,6);
+ for(int m=0;m<80;++m){test_millis+=60000;h.status();h.check_safety_();}
+ h.set_zone_level(3,5);for(int m=0;m<200;++m){test_millis+=60000;h.status();h.check_safety_();}
+ assert(!h.faulted());assert(h.commanded_level(3)==5);
+ for(int m=0;m<41;++m){test_millis+=60000;h.status();h.check_safety_();}assert(h.faulted());}
+assert(MacsHob::auto_off_ms(2)==6*3600000UL&&MacsHob::auto_off_ms(4)==5*3600000UL&&MacsHob::auto_off_ms(5)==4*3600000UL&&MacsHob::auto_off_ms(10)==5400000UL);
+std::cout<<"34 control scenarios passed\n";
 }
